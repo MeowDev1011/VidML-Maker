@@ -1,54 +1,54 @@
-name: Generar Video VidML
+name: Generate VidML Video
 
 on:
   workflow_dispatch:
     inputs:
       prompt:
-        description: 'Descripción del video'
+        description: 'Video description'
         required: true
         type: string
       duration:
-        description: 'Duración en segundos (3-90)'
+        description: 'Video duration in seconds (3-90)'
         required: true
         default: '30'
         type: string
       style:
-        description: 'Estilo visual (Auto, Cyberpunk, Minimalist, Cinematic, Vivid, Retro)'
+        description: 'Visual style (Auto, Cyberpunk, Minimalist, Cinematic, Vivid, Retro)'
         required: true
         default: 'Auto'
         type: string
       quality:
-        description: 'Calidad (Basic, High, Ultra)'
+        description: 'Quality (Basic, High, Ultra)'
         required: true
-        default: 'Auto'
+        default: 'High'
         type: string
       aspect_ratio:
-        description: 'Relación de aspecto (9:16, 16:9, 1:1, etc.)'
+        description: 'Aspect ratio (9:16, 16:9, 1:1)'
         required: true
         default: '9:16'
         type: string
       video_language:
-        description: 'Idioma del video (English, Español, Português, etc.)'
+        description: 'Video language (e.g., English, Spanish)'
         required: true
         default: 'English'
         type: string
       subtitles:
-        description: '¿Incluir subtítulos? (yes/no)'
+        description: 'Include subtitles? (yes/no)'
         required: true
         default: 'no'
         type: string
       subtitle_language:
-        description: 'Idioma de subtítulos (Same, English, Español, etc.)'
+        description: 'Subtitle language (Same, English, Spanish)'
         required: true
         default: 'Same'
         type: string
       add_music:
-        description: '¿Incluir música de fondo? (yes/no)'
+        description: 'Include background music? (yes/no)'
         required: true
         default: 'yes'
         type: string
       reference_image_url:
-        description: 'URL de imagen de referencia (opcional)'
+        description: 'Reference image URL (optional)'
         required: false
         default: ''
         type: string
@@ -59,100 +59,168 @@ jobs:
     permissions:
       contents: write
     steps:
-      - name: Checkout del repositorio
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Configurar Python
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
 
-      - name: Instalar dependencias del sistema
+      - name: Install system dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y ffmpeg
-          pip install huggingface_hub llama-cpp-python playwright requests
+          pip install llama-cpp-python playwright requests pillow
           playwright install chromium
           playwright install-deps chromium
 
-      - name: Descargar modelo GGUF con HF_TOKEN
+      - name: Download Llama model (1B for Basic, 3B for High/Ultra)
         env:
-          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          QUALITY: ${{ inputs.quality }}
         run: |
-          huggingface-cli download Qwen/Qwen2.5-Coder-1.5B-Instruct-GGUF qwen2.5-coder-1.5b-instruct-q4_k_m.gguf --local-dir ./modelo --token $HF_TOKEN
+          mkdir -p model
+          if [ "$QUALITY" == "Basic" ]; then
+            echo "Downloading Llama 3.2 1B (Lightweight)..."
+            wget -q --show-progress "https://github.com/MeowDev1011/VidML-Maker/releases/download/llama-models/Llama-3.2-1B-Instruct-Q4_K_M.Light.gguf" -O model/llama.gguf
+          else
+            echo "Downloading Llama 3.2 3B (Balanced)..."
+            wget -q --show-progress "https://github.com/MeowDev1011/VidML-Maker/releases/download/llama-models/llama-3.2-3b-instruct.Q3_K_M.gguf" -O model/llama.gguf
+          fi
+          ls -lh model/llama.gguf
 
-      - name: Generar HTML con el modelo (usando TODOS los parámetros)
+      - name: Generate style pack (15 data points)
+        env:
+          PROMPT: ${{ inputs.prompt }}
+          STYLE: ${{ inputs.style }}
+        run: |
+          python <<'EOF'
+          import os, json, random, urllib.request
+
+          prompt = os.environ.get('PROMPT', 'video')
+          chosen_style_name = os.environ.get('STYLE', 'Auto')
+
+          try:
+              url = "https://huekit.co/api/v1/colors.json"
+              with urllib.request.urlopen(url, timeout=10) as response:
+                  data = json.load(response)
+              all_colors = data.get("colors", [])
+              random.shuffle(all_colors)
+              palette = [c["hex"] for c in all_colors[:5]]
+          except Exception:
+              palette = ["#FF5733", "#33FF57", "#3357FF", "#FF33A1", "#FFC300"]
+
+          seed = f"vidml_{random.randint(1, 100000)}"
+          avatar_url = f"https://api.dicebear.com/9.x/personas/png?seed={seed}&size=200"
+
+          styles = [
+              "cyberpunk: neon, glitch, dark background, futuristic typography",
+              "minimalist: white space, sans-serif, smooth animations",
+              "cinematic: film grain, slow transitions, warm colors",
+              "vivid: saturated colors, fast movement, high contrast",
+              "retro: vintage palette, rounded corners, paper textures",
+              "3d-render: deep shadows, isometric perspective, highlights",
+              "nature: green tones, organic, soft shapes",
+              "tech: straight lines, electric blue, geometric icons",
+              "space: stars, cosmic gradients, floating motion"
+          ]
+          
+          if chosen_style_name != 'Auto':
+              chosen_style = next((s for s in styles if s.startswith(chosen_style_name.lower())), random.choice(styles))
+          else:
+              chosen_style = random.choice(styles)
+
+          style_pack = f"""
+          COLOR PALETTE: {', '.join(palette)}
+          CHARACTER: {avatar_url}
+          VISUAL STYLE: {chosen_style}
+          ADDITIONAL DIRECTIVES:
+          - Use gradients based on the palette.
+          - Include entrance and exit animations for text.
+          - Maintain high contrast for mobile readability.
+          - Add a subtle animated background (particles or geometric shapes).
+          - Ensure the code is valid and error-free.
+          """
+
+          with open('style_pack.txt', 'w') as f:
+              f.write(style_pack)
+
+          print("✅ Style pack generated:")
+          print(style_pack)
+          EOF
+
+      - name: Generate HTML with Llama
         env:
           PROMPT: ${{ inputs.prompt }}
           DURATION: ${{ inputs.duration }}
-          STYLE: ${{ inputs.style }}
           QUALITY: ${{ inputs.quality }}
           ASPECT_RATIO: ${{ inputs.aspect_ratio }}
           VIDEO_LANGUAGE: ${{ inputs.video_language }}
           SUBTITLES: ${{ inputs.subtitles }}
           SUBTITLE_LANGUAGE: ${{ inputs.subtitle_language }}
-          REFERENCE_IMAGE: ${{ inputs.reference_image_url }}
         run: |
           python <<'EOF'
           import os
           from llama_cpp import Llama
-          
+
           prompt = os.environ['PROMPT']
           duration = os.environ['DURATION']
-          style = os.environ['STYLE']
           quality = os.environ['QUALITY']
           aspect_ratio = os.environ['ASPECT_RATIO']
           video_language = os.environ['VIDEO_LANGUAGE']
           subtitles = os.environ['SUBTITLES']
           subtitle_language = os.environ['SUBTITLE_LANGUAGE']
-          reference_image = os.environ.get('REFERENCE_IMAGE', '')
-          
-          # Calcular dimensiones según relación de aspecto
-          ratio_map = {'9:16': (480, 854), '16:9': (854, 480), '1:1': (600, 600), '4:3': (800, 600), '3:4': (600, 800)}
+
+          ratio_map = {'9:16': (480, 854), '16:9': (854, 480), '1:1': (600, 600)}
           width, height = ratio_map.get(aspect_ratio, (480, 854))
-          
-          # Determinar idioma real de subtítulos
+
           actual_sub_lang = video_language if subtitle_language == 'Same' else subtitle_language
           sub_text = f"with subtitles in {actual_sub_lang}" if subtitles == 'yes' else "without subtitles"
-          
-          # Prompts según calidad
+
+          with open('style_pack.txt', 'r') as f:
+              style_pack = f.read()
+
           if quality == 'Basic':
-              quality_instructions = "Create 2 simple scenes with basic CSS animations."
+              quality_instructions = "Create 2 simple scenes with basic CSS animations. Keep the code short."
           elif quality == 'High':
               quality_instructions = "Create 3 scenes with GSAP animations, gradients, and animated text."
-          else:  # Ultra
-              quality_instructions = "Create 5+ complex scenes with advanced GSAP animations, stagger effects, 3D rotations, morphing SVG shapes, professional typography (Google Fonts), sophisticated color palette with CSS variables, and a subtle particle background."
-          
-          ref_instruction = f" Use the reference image from {reference_image} as color palette inspiration." if reference_image else ""
-          
-          system_prompt = f"""You are an expert motion designer. Create a self-contained HTML document for a vertical video ({aspect_ratio} aspect ratio, {width}x{height} pixels) about: "{prompt}". 
-          Style: {style}. 
+          else: # Ultra
+              quality_instructions = """ULTRA QUALITY REQUIREMENTS:
+          1. Create a minimum of 5 distinct, high-quality scenes.
+          2. Use GSAP for complex animations: timeline sequences, stagger effects, 3D rotations, and morphing SVG shapes.
+          3. Use Google Fonts (e.g., 'Montserrat') for professional typography.
+          4. Define a sophisticated color palette using CSS variables. Use multiple gradients and box-shadows.
+          5. Do NOT use external images or videos. Use only CSS and inline SVG.
+          6. Ensure the code is 100% valid and error-free. Do not truncate the HTML.
+          7. Add a subtle particle or geometric background animation."""
+
+          system_prompt = f"""You are an expert motion designer. Create a self-contained HTML document for a vertical video ({aspect_ratio} aspect ratio, {width}x{height} pixels) about: "{prompt}".
+          Style: {style_pack}
           Duration: {duration} seconds.
           Language: {video_language}.
           {sub_text}.
-          Quality level: {quality}. {quality_instructions}{ref_instruction}
-          Use GSAP (loaded via CDN) for animations. Return ONLY the raw HTML code, starting with <!DOCTYPE html> and ending with </html>. Do not include markdown blocks."""
-          
-          print(f"Generando con: style={style}, quality={quality}, ratio={aspect_ratio}, lang={video_language}, subs={subtitles}")
-          
-          llm = Llama(model_path="./modelo/qwen2.5-coder-1.5b-instruct-q4_k_m.gguf", n_ctx=4096, n_threads=2)
-          
-          output = llm(system_prompt, max_tokens=3500, temperature=0.7)
+          Quality level: {quality}. {quality_instructions}
+          Use GSAP (loaded via CDN) for animations. Return ONLY the raw HTML code, starting with <!DOCTYPE html> and ending with </html>."""
+
+          print(f"Generating with model: {'1B' if quality == 'Basic' else '3B'} | Quality: {quality}")
+
+          llm = Llama(model_path="./model/llama.gguf", n_ctx=4096, n_threads=2)
+          output = llm(system_prompt, max_tokens=4000, temperature=0.7)
           html = output['choices'][0]['text']
           html = html.replace('```html', '').replace('```', '').strip()
-          
+
           with open('video.html', 'w') as f:
               f.write(html)
-          
+
           slug = ''.join(c if c.isalnum() else '-' for c in prompt.lower())[:30].strip('-')
           with open('slug.txt', 'w') as f:
               f.write(slug)
-          
+
           with open('dims.txt', 'w') as f:
               f.write(f"{width}x{height}")
           EOF
 
-      - name: Buscar música de fondo (si aplica)
+      - name: Fetch background music (if enabled)
         if: ${{ inputs.add_music == 'yes' }}
         env:
           FREESOUND_KEY: ${{ secrets.FREESOUND_API_KEY }}
@@ -161,28 +229,22 @@ jobs:
           python <<'EOF'
           import os, requests
           prompt = os.environ['PROMPT']
-          # Extraer palabras clave simples del prompt para buscar música
           query = ' '.join(prompt.lower().split()[:3])
           try:
-              url = f"https://freesound.org/apiv2/search/text/?query={query}&token={os.environ['FREESOUND_KEY']}&fields=previews&filter=type:mp3"
+              url = f"https://freesound.org/apiv2/search/text/?query={query}&token={os.environ['FREESOUND_KEY']}&fields=previews"
               res = requests.get(url, timeout=30)
               data = res.json()
-              if data.get('results') and len(data['results']) > 0:
+              if data.get('results'):
                   audio_url = data['results'][0]['previews'].get('preview-hq-mp3')
                   if audio_url:
-                      audio_res = requests.get(audio_url, timeout=60)
+                      audio = requests.get(audio_url, timeout=60)
                       with open('music.mp3', 'wb') as f:
-                          f.write(audio_res.content)
-                      print(f"Música descargada: {audio_url}")
-                  else:
-                      print("No se encontró URL de audio")
-              else:
-                  print("No se encontró música para este prompt")
+                          f.write(audio.content)
           except Exception as e:
-              print(f"Error buscando música: {e}")
+              print(f"Music fetch error: {e}")
           EOF
 
-      - name: Renderizar video con Playwright y FFmpeg
+      - name: Render video
         env:
           DURATION: ${{ inputs.duration }}
           ADD_MUSIC: ${{ inputs.add_music }}
@@ -190,88 +252,61 @@ jobs:
           python <<'EOF'
           import asyncio, os
           from playwright.async_api import async_playwright
-          
+
           DURATION = int(os.environ['DURATION'])
           FPS = 30
           TOTAL_FRAMES = DURATION * FPS
-          
           with open('dims.txt', 'r') as f:
               w, h = map(int, f.read().split('x'))
-          
+
           async def render():
               async with async_playwright() as p:
                   browser = await p.chromium.launch(args=['--no-sandbox'])
                   page = await browser.new_page(viewport={'width': w, 'height': h})
                   await page.goto('file://' + os.getcwd() + '/video.html')
                   await page.wait_for_timeout(1000)
-                  
                   os.makedirs('frames', exist_ok=True)
                   for i in range(TOTAL_FRAMES):
                       await page.screenshot(path=f'frames/frame_{i:05d}.png')
                       await page.wait_for_timeout(1000 // FPS)
-                  
                   await browser.close()
-          
           asyncio.run(render())
           EOF
-          
-          # Ensamblar video con o sin música
+
           if [ -f music.mp3 ] && [ "$ADD_MUSIC" = "yes" ]; then
             ffmpeg -framerate 30 -i frames/frame_%05d.png -i music.mp3 -c:v libx264 -pix_fmt yuv420p -c:a aac -shortest -y video.mp4
           else
             ffmpeg -framerate 30 -i frames/frame_%05d.png -c:v libx264 -pix_fmt yuv420p -y video.mp4
           fi
-          ls -lh video.mp4
 
-      - name: Crear nombre único
+      - name: Create unique filename
         id: filename
         run: |
           SLUG=$(cat slug.txt)
           TIMESTAMP=$(date +%Y%m%d-%H%M%S)
           echo "name=${SLUG}-${TIMESTAMP}" >> $GITHUB_OUTPUT
 
-      - name: Subir video a GitHub Releases
+      - name: Publish to GitHub Releases
         uses: softprops/action-gh-release@v2
         with:
           tag_name: video-${{ steps.filename.outputs.name }}
           files: video.mp4
-          name: "Video: ${{ inputs.prompt }}"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Obtener URL de descarga
-        id: url
-        run: |
-          URL="https://github.com/${{ github.repository }}/releases/download/video-${{ steps.filename.outputs.name }}/video.mp4"
-          echo "video_url=$URL" >> $GITHUB_OUTPUT
-          echo "::notice::URL del video: $URL"
-
-      - name: Limpiar videos antiguos (mantener los últimos 30)
+      - name: Clean up old releases (keep last 30)
         uses: actions/github-script@v7
         with:
           script: |
             const MAX_RELEASES = 30;
-            const releases = await github.rest.repos.listReleases({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              per_page: 100
-            });
+            const releases = await github.rest.repos.listReleases({ owner: context.repo.owner, repo: context.repo.repo });
             const sorted = releases.data.sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
             if (sorted.length > MAX_RELEASES) {
               const toDelete = sorted.slice(0, sorted.length - MAX_RELEASES);
               for (const release of toDelete) {
-                console.log(`Borrando release antiguo: ${release.tag_name}`);
-                await github.rest.repos.deleteRelease({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  release_id: release.id
-                });
+                await github.rest.repos.deleteRelease({ owner: context.repo.owner, repo: context.repo.repo, release_id: release.id });
                 try {
-                  await github.rest.repos.deleteRef({
-                    owner: context.repo.owner,
-                    repo: context.repo.repo,
-                    ref: `tags/${release.tag_name}`
-                  });
-                } catch (e) { console.log('Tag ya borrado'); }
+                  await github.rest.git.deleteRef({ owner: context.repo.owner, repo: context.repo.repo, ref: `tags/${release.tag_name}` });
+                } catch (e) {}
               }
             }
