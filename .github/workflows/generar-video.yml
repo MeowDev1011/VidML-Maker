@@ -8,9 +8,49 @@ on:
         required: true
         type: string
       duration:
-        description: 'Duración en segundos'
+        description: 'Duración en segundos (3-90)'
         required: true
         default: '30'
+        type: string
+      style:
+        description: 'Estilo visual (Auto, Cyberpunk, Minimalist, Cinematic, Vivid, Retro)'
+        required: true
+        default: 'Auto'
+        type: string
+      quality:
+        description: 'Calidad (Basic, High, Ultra)'
+        required: true
+        default: 'Auto'
+        type: string
+      aspect_ratio:
+        description: 'Relación de aspecto (9:16, 16:9, 1:1, etc.)'
+        required: true
+        default: '9:16'
+        type: string
+      video_language:
+        description: 'Idioma del video (English, Español, Português, etc.)'
+        required: true
+        default: 'English'
+        type: string
+      subtitles:
+        description: '¿Incluir subtítulos? (yes/no)'
+        required: true
+        default: 'no'
+        type: string
+      subtitle_language:
+        description: 'Idioma de subtítulos (Same, English, Español, etc.)'
+        required: true
+        default: 'Same'
+        type: string
+      add_music:
+        description: '¿Incluir música de fondo? (yes/no)'
+        required: true
+        default: 'yes'
+        type: string
+      reference_image_url:
+        description: 'URL de imagen de referencia (opcional)'
+        required: false
+        default: ''
         type: string
 
 jobs:
@@ -31,7 +71,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y ffmpeg
-          pip install huggingface_hub llama-cpp-python playwright
+          pip install huggingface_hub llama-cpp-python playwright requests
           playwright install chromium
           playwright install-deps chromium
 
@@ -41,10 +81,17 @@ jobs:
         run: |
           huggingface-cli download Qwen/Qwen2.5-Coder-1.5B-Instruct-GGUF qwen2.5-coder-1.5b-instruct-q4_k_m.gguf --local-dir ./modelo --token $HF_TOKEN
 
-      - name: Generar HTML con el modelo
+      - name: Generar HTML con el modelo (usando TODOS los parámetros)
         env:
           PROMPT: ${{ inputs.prompt }}
           DURATION: ${{ inputs.duration }}
+          STYLE: ${{ inputs.style }}
+          QUALITY: ${{ inputs.quality }}
+          ASPECT_RATIO: ${{ inputs.aspect_ratio }}
+          VIDEO_LANGUAGE: ${{ inputs.video_language }}
+          SUBTITLES: ${{ inputs.subtitles }}
+          SUBTITLE_LANGUAGE: ${{ inputs.subtitle_language }}
+          REFERENCE_IMAGE: ${{ inputs.reference_image_url }}
         run: |
           python <<'EOF'
           import os
@@ -52,12 +99,45 @@ jobs:
           
           prompt = os.environ['PROMPT']
           duration = os.environ['DURATION']
+          style = os.environ['STYLE']
+          quality = os.environ['QUALITY']
+          aspect_ratio = os.environ['ASPECT_RATIO']
+          video_language = os.environ['VIDEO_LANGUAGE']
+          subtitles = os.environ['SUBTITLES']
+          subtitle_language = os.environ['SUBTITLE_LANGUAGE']
+          reference_image = os.environ.get('REFERENCE_IMAGE', '')
+          
+          # Calcular dimensiones según relación de aspecto
+          ratio_map = {'9:16': (480, 854), '16:9': (854, 480), '1:1': (600, 600), '4:3': (800, 600), '3:4': (600, 800)}
+          width, height = ratio_map.get(aspect_ratio, (480, 854))
+          
+          # Determinar idioma real de subtítulos
+          actual_sub_lang = video_language if subtitle_language == 'Same' else subtitle_language
+          sub_text = f"with subtitles in {actual_sub_lang}" if subtitles == 'yes' else "without subtitles"
+          
+          # Prompts según calidad
+          if quality == 'Basic':
+              quality_instructions = "Create 2 simple scenes with basic CSS animations."
+          elif quality == 'High':
+              quality_instructions = "Create 3 scenes with GSAP animations, gradients, and animated text."
+          else:  # Ultra
+              quality_instructions = "Create 5+ complex scenes with advanced GSAP animations, stagger effects, 3D rotations, morphing SVG shapes, professional typography (Google Fonts), sophisticated color palette with CSS variables, and a subtle particle background."
+          
+          ref_instruction = f" Use the reference image from {reference_image} as color palette inspiration." if reference_image else ""
+          
+          system_prompt = f"""You are an expert motion designer. Create a self-contained HTML document for a vertical video ({aspect_ratio} aspect ratio, {width}x{height} pixels) about: "{prompt}". 
+          Style: {style}. 
+          Duration: {duration} seconds.
+          Language: {video_language}.
+          {sub_text}.
+          Quality level: {quality}. {quality_instructions}{ref_instruction}
+          Use GSAP (loaded via CDN) for animations. Return ONLY the raw HTML code, starting with <!DOCTYPE html> and ending with </html>. Do not include markdown blocks."""
+          
+          print(f"Generando con: style={style}, quality={quality}, ratio={aspect_ratio}, lang={video_language}, subs={subtitles}")
           
           llm = Llama(model_path="./modelo/qwen2.5-coder-1.5b-instruct-q4_k_m.gguf", n_ctx=4096, n_threads=2)
           
-          system_prompt = f"""You are a motion designer. Create a self-contained HTML document for a vertical video (9:16) about: "{prompt}". Use GSAP (loaded via CDN) for animations with at least 3 scenes, gradients, and animated text. The total animation should last {duration} seconds. Return ONLY the raw HTML code, starting with <!DOCTYPE html> and ending with </html>."""
-          
-          output = llm(system_prompt, max_tokens=3000, temperature=0.7)
+          output = llm(system_prompt, max_tokens=3500, temperature=0.7)
           html = output['choices'][0]['text']
           html = html.replace('```html', '').replace('```', '').strip()
           
@@ -67,25 +147,61 @@ jobs:
           slug = ''.join(c if c.isalnum() else '-' for c in prompt.lower())[:30].strip('-')
           with open('slug.txt', 'w') as f:
               f.write(slug)
+          
+          with open('dims.txt', 'w') as f:
+              f.write(f"{width}x{height}")
+          EOF
+
+      - name: Buscar música de fondo (si aplica)
+        if: ${{ inputs.add_music == 'yes' }}
+        env:
+          FREESOUND_KEY: ${{ secrets.FREESOUND_API_KEY }}
+          PROMPT: ${{ inputs.prompt }}
+        run: |
+          python <<'EOF'
+          import os, requests
+          prompt = os.environ['PROMPT']
+          # Extraer palabras clave simples del prompt para buscar música
+          query = ' '.join(prompt.lower().split()[:3])
+          try:
+              url = f"https://freesound.org/apiv2/search/text/?query={query}&token={os.environ['FREESOUND_KEY']}&fields=previews&filter=type:mp3"
+              res = requests.get(url, timeout=30)
+              data = res.json()
+              if data.get('results') and len(data['results']) > 0:
+                  audio_url = data['results'][0]['previews'].get('preview-hq-mp3')
+                  if audio_url:
+                      audio_res = requests.get(audio_url, timeout=60)
+                      with open('music.mp3', 'wb') as f:
+                          f.write(audio_res.content)
+                      print(f"Música descargada: {audio_url}")
+                  else:
+                      print("No se encontró URL de audio")
+              else:
+                  print("No se encontró música para este prompt")
+          except Exception as e:
+              print(f"Error buscando música: {e}")
           EOF
 
       - name: Renderizar video con Playwright y FFmpeg
         env:
           DURATION: ${{ inputs.duration }}
+          ADD_MUSIC: ${{ inputs.add_music }}
         run: |
           python <<'EOF'
-          import asyncio
-          import os
+          import asyncio, os
           from playwright.async_api import async_playwright
           
           DURATION = int(os.environ['DURATION'])
           FPS = 30
           TOTAL_FRAMES = DURATION * FPS
           
+          with open('dims.txt', 'r') as f:
+              w, h = map(int, f.read().split('x'))
+          
           async def render():
               async with async_playwright() as p:
                   browser = await p.chromium.launch(args=['--no-sandbox'])
-                  page = await browser.new_page(viewport={'width': 480, 'height': 854})
+                  page = await browser.new_page(viewport={'width': w, 'height': h})
                   await page.goto('file://' + os.getcwd() + '/video.html')
                   await page.wait_for_timeout(1000)
                   
@@ -99,7 +215,12 @@ jobs:
           asyncio.run(render())
           EOF
           
-          ffmpeg -framerate 30 -i frames/frame_%05d.png -c:v libx264 -pix_fmt yuv420p -y video.mp4
+          # Ensamblar video con o sin música
+          if [ -f music.mp3 ] && [ "$ADD_MUSIC" = "yes" ]; then
+            ffmpeg -framerate 30 -i frames/frame_%05d.png -i music.mp3 -c:v libx264 -pix_fmt yuv420p -c:a aac -shortest -y video.mp4
+          else
+            ffmpeg -framerate 30 -i frames/frame_%05d.png -c:v libx264 -pix_fmt yuv420p -y video.mp4
+          fi
           ls -lh video.mp4
 
       - name: Crear nombre único
@@ -123,7 +244,7 @@ jobs:
         run: |
           URL="https://github.com/${{ github.repository }}/releases/download/video-${{ steps.filename.outputs.name }}/video.mp4"
           echo "video_url=$URL" >> $GITHUB_OUTPUT
-          echo "URL final: $URL"
+          echo "::notice::URL del video: $URL"
 
       - name: Limpiar videos antiguos (mantener los últimos 30)
         uses: actions/github-script@v7
@@ -146,7 +267,7 @@ jobs:
                   release_id: release.id
                 });
                 try {
-                  await github.rest.git.deleteRef({
+                  await github.rest.repos.deleteRef({
                     owner: context.repo.owner,
                     repo: context.repo.repo,
                     ref: `tags/${release.tag_name}`
