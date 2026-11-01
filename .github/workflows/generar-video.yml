@@ -17,36 +17,19 @@ on:
         required: true
         default: 'Auto'
         type: choice
-        options:
-          - Auto
-          - Cyberpunk
-          - Minimalist
-          - Cinematic
-          - Vivid
-          - Retro
+        options: [Auto, Cyberpunk, Minimalist, Cinematic, Vivid, Retro]
       quality:
         description: 'Quality (Basic=1B model, High/Ultra=3B model)'
         required: true
         default: 'High'
         type: choice
-        options:
-          - Basic
-          - High
-          - Ultra
+        options: [Basic, High, Ultra]
       aspect_ratio:
         description: 'Aspect ratio'
         required: true
         default: '9:16'
         type: choice
-        options:
-          - '9:16'
-          - '16:9'
-          - '1:1'
-          - '4:3'
-          - '3:4'
-          - '4:5'
-          - '5:4'
-          - '21:9'
+        options: ['9:16', '16:9', '1:1', '4:3', '3:4', '4:5', '5:4', '21:9']
       video_language:
         description: 'Video language'
         required: true
@@ -57,9 +40,7 @@ on:
         required: true
         default: 'no'
         type: choice
-        options:
-          - 'yes'
-          - 'no'
+        options: ['yes', 'no']
       subtitle_language:
         description: 'Subtitle language'
         required: true
@@ -70,9 +51,7 @@ on:
         required: true
         default: 'yes'
         type: choice
-        options:
-          - 'yes'
-          - 'no'
+        options: ['yes', 'no']
       reference_image_url:
         description: 'Reference image URL (optional)'
         required: false
@@ -93,7 +72,7 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
-          cache: 'pip'
+          # cache: 'pip'  <-- LÍNEA ELIMINADA
 
       - name: Install system and Python dependencies
         run: |
@@ -122,14 +101,12 @@ jobs:
             MODEL_URL="https://github.com/MeowDev1011/VidML-Maker/releases/download/llama-models/llama-3.2-3b-instruct.Q3_K_M.gguf"
             MODEL_FILE="model_cache/llama-3b.gguf"
           fi
-          
           if [ ! -f "$MODEL_FILE" ]; then
             echo "Downloading $MODEL_URL"
             wget -q --show-progress "$MODEL_URL" -O "$MODEL_FILE"
           else
             echo "Using cached model: $MODEL_FILE"
           fi
-          
           cp "$MODEL_FILE" model/llama.gguf
           ls -lh model/llama.gguf
 
@@ -157,12 +134,12 @@ jobs:
                   colors = img.getcolors(maxcolors=100000)
                   colors.sort(key=lambda x: x[0], reverse=True)
                   palette = ['#{:02X}{:02X}{:02X}'.format(*rgb) for _, rgb in colors[:5]]
-                  print(f"Palette extracted from reference: {palette}")
+                  print(f"Palette extracted: {palette}")
               except Exception as e:
-                  print(f"Could not extract palette: {e}")
+                  print(f"Palette extraction failed: {e}")
 
           if not palette:
-              curated_palettes = [
+              curated = [
                   ["#FF6B6B", "#4ECDC4", "#45B7D1", "#96CEB4", "#FFEAA7"],
                   ["#6C5CE7", "#A29BFE", "#74B9FF", "#0984E3", "#00CEC9"],
                   ["#E17055", "#FDCB6E", "#FFEAA7", "#FAB1A0", "#FF7675"],
@@ -172,13 +149,13 @@ jobs:
                   ["#F39C12", "#E67E22", "#D35400", "#C0392B", "#7B241C"],
                   ["#1ABC9C", "#16A085", "#27AE60", "#2ECC71", "#58D68D"],
               ]
-              palette = random.choice(curated_palettes)
+              palette = random.choice(curated)
 
           adjectives = ["cute", "charming", "expressive", "playful", "elegant", "quirky"]
           characters = [
               f"A {random.choice(adjectives)} cartoon character inspired by the theme",
-              f"A friendly animated mascot representing the main idea",
-              f"A stylized illustrated figure that embodies the concept",
+              "A friendly animated mascot representing the main idea",
+              "A stylized illustrated figure that embodies the concept",
           ]
           character = random.choice(characters)
 
@@ -191,28 +168,27 @@ jobs:
               'Auto': ["dynamic animations", "balanced composition", "clear typography", "smooth transitions", "subtle particles", "engaging motion", "modern aesthetic", "visual hierarchy", "professional polish"],
           }
           selected_style = chosen_style if chosen_style in style_library else 'Auto'
-          style_directives = style_library[selected_style]
+          directives = style_library[selected_style]
 
           style_pack = f"""STYLE PACK (use these exact details):
-          COLOR PALETTE: {', '.join(palette)}
-          CHARACTER: {character}
-          VISUAL STYLE: {selected_style}
-          STYLE DIRECTIVES:
-          1. {style_directives[0]}
-          2. {style_directives[1]}
-          3. {style_directives[2]}
-          4. {style_directives[3]}
-          5. {style_directives[4]}
-          6. {style_directives[5]}
-          7. {style_directives[6]}
-          8. {style_directives[7]}
-          9. {style_directives[8]}
+COLOR PALETTE: {', '.join(palette)}
+CHARACTER: {character}
+VISUAL STYLE: {selected_style}
+STYLE DIRECTIVES:
+1. {directives[0]}
+2. {directives[1]}
+3. {directives[2]}
+4. {directives[3]}
+5. {directives[4]}
+6. {directives[5]}
+7. {directives[6]}
+8. {directives[7]}
+9. {directives[8]}
 
-          Apply these colors, character, and style directives throughout the video."""
+Apply these colors, character, and style directives throughout the video."""
 
           with open('style_pack.txt', 'w', encoding='utf-8') as f:
               f.write(style_pack)
-
           print("=" * 60)
           print(style_pack)
           print("=" * 60)
@@ -241,83 +217,55 @@ jobs:
           subtitle_language = os.environ['SUBTITLE_LANGUAGE']
 
           ratio_map = {
-              '9:16': (480, 854),
-              '16:9': (854, 480),
-              '1:1': (600, 600),
-              '4:3': (800, 600),
-              '3:4': (600, 800),
-              '4:5': (600, 750),
-              '5:4': (750, 600),
-              '21:9': (960, 411),
+              '9:16': (480, 854), '16:9': (854, 480), '1:1': (600, 600),
+              '4:3': (800, 600), '3:4': (600, 800), '4:5': (600, 750),
+              '5:4': (750, 600), '21:9': (960, 411),
           }
           width, height = ratio_map.get(aspect_ratio, (480, 854))
 
-          actual_sub_lang = video_language if subtitle_language == 'Same' else subtitle_language
-          sub_text = f"with subtitles in {actual_sub_lang}" if subtitles == 'yes' else "without subtitles"
+          actual_sub = video_language if subtitle_language == 'Same' else subtitle_language
+          sub_text = f"with subtitles in {actual_sub}" if subtitles == 'yes' else "without subtitles"
 
           with open('style_pack.txt', 'r', encoding='utf-8') as f:
               style_pack = f.read()
 
           if quality == 'Basic':
-              quality_instructions = "Create 2 simple scenes with basic CSS animations. Keep the code short."
+              q_instructions = "Create 2 simple scenes with basic CSS animations. Keep the code short."
           elif quality == 'High':
-              quality_instructions = "Create 3 scenes with GSAP animations, gradients, and animated text."
+              q_instructions = "Create 3 scenes with GSAP animations, gradients, and animated text."
           else:
-              quality_instructions = """ULTRA QUALITY REQUIREMENTS:
-          1. Create a minimum of 5 distinct, high-quality scenes.
-          2. Use GSAP for complex animations: timeline sequences, stagger effects, 3D rotations, and morphing SVG shapes.
-          3. Use professional typography.
-          4. Define a sophisticated color palette using CSS variables.
-          5. Do NOT use external images or videos. Use only CSS and inline SVG.
-          6. Ensure the code is 100% valid and error-free.
-          7. Add a subtle particle or geometric background animation."""
+              q_instructions = """ULTRA QUALITY REQUIREMENTS:
+1. Create a minimum of 5 distinct, high-quality scenes.
+2. Use GSAP for complex animations: timeline sequences, stagger effects, 3D rotations, and morphing SVG shapes.
+3. Use professional typography.
+4. Define a sophisticated color palette using CSS variables.
+5. Do NOT use external images or videos. Use only CSS and inline SVG.
+6. Ensure the code is 100% valid and error-free.
+7. Add a subtle particle or geometric background animation."""
 
-          system_prompt = f"""You are an expert motion designer. Create a self-contained HTML document for a vertical video ({aspect_ratio} aspect ratio, {width}x{height} pixels) about: "{prompt}".
-          
-          {style_pack}
-          
-          Duration: {duration} seconds.
-          Language: {video_language}.
-          {sub_text}.
-          Quality level: {quality}. {quality_instructions}
-          
-          Use GSAP (loaded via CDN) for animations. Return ONLY the raw HTML code, starting with <!DOCTYPE html> and ending with </html>. Do not include markdown blocks."""
+          system_prompt = f"""You are an expert motion designer. Create a self-contained HTML document for a vertical video ({aspect_ratio}, {width}x{height}px) about: "{prompt}".
+{style_pack}
+Duration: {duration}s. Language: {video_language}. {sub_text}.
+Quality: {quality}. {q_instructions}
+Use GSAP (via CDN). Return ONLY raw HTML, starting with <!DOCTYPE html> and ending with </html>. No markdown."""
 
           print(f"Generating with {'1B' if quality == 'Basic' else '3B'} model | Quality: {quality}")
 
-          llm = Llama(
-              model_path="./model/llama.gguf",
-              n_ctx=4096,
-              n_threads=4,
-              verbose=False,
-          )
-          output = llm(
-              system_prompt,
-              max_tokens=4000,
-              temperature=0.7,
-              stop=["</html>", "<|im_end|>"],
-          )
-          html = output['choices'][0]['text']
-          html = html.replace('```html', '').replace('```', '').strip()
+          llm = Llama(model_path="./model/llama.gguf", n_ctx=4096, n_threads=4, verbose=False)
+          output = llm(system_prompt, max_tokens=4000, temperature=0.7, stop=["</html>", "<|im_end|>"])
+          html = output['choices'][0]['text'].replace('```html', '').replace('```', '').strip()
 
           if '</html>' not in html:
               html += '\n</html>'
-
           if '<!DOCTYPE html>' not in html and '<html' not in html.lower():
-              print("ERROR: Model did not return valid HTML", file=sys.stderr)
-              print(html[:500], file=sys.stderr)
+              print("ERROR: Invalid HTML from model", file=sys.stderr)
               sys.exit(1)
 
           with open('video.html', 'w', encoding='utf-8') as f:
               f.write(html)
-
           slug = ''.join(c if c.isalnum() else '-' for c in prompt.lower())[:30].strip('-') or 'video'
-          with open('slug.txt', 'w') as f:
-              f.write(slug)
-
-          with open('dims.txt', 'w') as f:
-              f.write(f"{width}x{height}")
-
+          with open('slug.txt', 'w') as f: f.write(slug)
+          with open('dims.txt', 'w') as f: f.write(f"{width}x{height}")
           print(f"HTML generated: {len(html)} chars")
           EOF
 
@@ -332,9 +280,8 @@ jobs:
           prompt = os.environ['PROMPT']
           key = os.environ.get('FREESOUND_KEY')
           if not key:
-              print("FREESOUND_API_KEY not configured. Skipping music.")
+              print("FREESOUND_API_KEY not set. Skipping music.")
               exit(0)
-          
           query = ' '.join(prompt.lower().split()[:3])
           try:
               url = f"https://freesound.org/apiv2/search/text/?query={query}&token={key}&fields=previews"
@@ -344,11 +291,8 @@ jobs:
                   audio_url = data['results'][0]['previews'].get('preview-hq-mp3')
                   if audio_url:
                       audio = requests.get(audio_url, timeout=60)
-                      with open('music.mp3', 'wb') as f:
-                          f.write(audio.content)
+                      with open('music.mp3', 'wb') as f: f.write(audio.content)
                       print(f"Music downloaded: {audio_url}")
-              else:
-                  print("No music results")
           except Exception as e:
               print(f"Music fetch error: {e}")
           EOF
@@ -364,7 +308,6 @@ jobs:
           duration = int(os.environ['DURATION'])
           with open('dims.txt', 'r') as f:
               w, h = map(int, f.read().split('x'))
-
           os.makedirs('videos', exist_ok=True)
 
           async def render():
@@ -382,14 +325,11 @@ jobs:
                   await browser.close()
 
           asyncio.run(render())
-
           webm_files = glob.glob('videos/*.webm')
           if not webm_files:
               raise SystemExit("ERROR: No video recorded")
           print(f"Recorded: {webm_files[0]}")
-
-          with open('recorded_video.txt', 'w') as f:
-              f.write(webm_files[0])
+          with open('recorded_video.txt', 'w') as f: f.write(webm_files[0])
           EOF
 
       - name: Convert to MP4 and add music
@@ -397,24 +337,14 @@ jobs:
           ADD_MUSIC: ${{ inputs.add_music }}
         run: |
           RECORDED=$(cat recorded_video.txt)
-          echo "Processing: $RECORDED"
-          
           if [ -f music.mp3 ] && [ "$ADD_MUSIC" = "yes" ]; then
-            ffmpeg -y -i "$RECORDED" -i music.mp3 \
-              -c:v libx264 -preset fast -crf 23 -pix_fmt yuv420p \
-              -c:a aac -b:a 128k -shortest \
-              video.mp4
+            ffmpeg -y -i "$RECORDED" -i music.mp3 -c:v libx264 -preset fast -crf 23 -pix_fmt yuv420p -c:a aac -b:a 128k -shortest video.mp4
           else
-            ffmpeg -y -i "$RECORDED" \
-              -c:v libx264 -preset fast -crf 23 -pix_fmt yuv420p \
-              video.mp4
+            ffmpeg -y -i "$RECORDED" -c:v libx264 -preset fast -crf 23 -pix_fmt yuv420p video.mp4
           fi
-          
           if [ ! -f video.mp4 ]; then
-            echo "ERROR: video.mp4 not created"
-            exit 1
+            echo "ERROR: video.mp4 not created"; exit 1
           fi
-          
           ls -lh video.mp4
 
       - name: Create unique filename
@@ -431,12 +361,9 @@ jobs:
           name: "Video: ${{ inputs.prompt }}"
           body: |
             Video generated with VidML Maker
-            
             - Prompt: ${{ inputs.prompt }}
             - Duration: ${{ inputs.duration }}s
             - Quality: ${{ inputs.quality }}
-            - Aspect Ratio: ${{ inputs.aspect_ratio }}
-            - Language: ${{ inputs.video_language }}
           files: video.mp4
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -453,34 +380,17 @@ jobs:
         with:
           script: |
             const MAX_RELEASES = 30;
-            const releases = await github.rest.repos.listReleases({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              per_page: 100
-            });
-            
-            // NEVER delete llama-models. Only touch releases starting with "video-"
+            const releases = await github.rest.repos.listReleases({ owner: context.repo.owner, repo: context.repo.repo, per_page: 100 });
             const videoReleases = releases.data.filter(r => r.tag_name.startsWith('video-'));
             const sorted = videoReleases.sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
-            
             if (sorted.length > MAX_RELEASES) {
               const toDelete = sorted.slice(0, sorted.length - MAX_RELEASES);
               for (const release of toDelete) {
                 console.log(`Deleting old video: ${release.tag_name}`);
-                await github.rest.repos.deleteRelease({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  release_id: release.id
-                });
+                await github.rest.repos.deleteRelease({ owner: context.repo.owner, repo: context.repo.repo, release_id: release.id });
                 try {
-                  await github.rest.git.deleteRef({
-                    owner: context.repo.owner,
-                    repo: context.repo.repo,
-                    ref: `tags/${release.tag_name}`
-                  });
-                } catch (e) {
-                  console.log(`Tag already deleted: ${release.tag_name}`);
-                }
+                  await github.rest.git.deleteRef({ owner: context.repo.owner, repo: context.repo.repo, ref: `tags/${release.tag_name}` });
+                } catch (e) { console.log(`Tag already deleted: ${release.tag_name}`); }
               }
             } else {
               console.log(`Only ${sorted.length} video releases. No cleanup needed.`);
