@@ -1,0 +1,156 @@
+name: Generar Video VidML
+
+on:
+  workflow_dispatch:
+    inputs:
+      prompt:
+        description: 'Descripción del video'
+        required: true
+        type: string
+      duration:
+        description: 'Duración en segundos'
+        required: true
+        default: '30'
+        type: string
+
+jobs:
+  render-video:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout del repositorio
+        uses: actions/checkout@v4
+
+      - name: Configurar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Instalar dependencias del sistema
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+          pip install huggingface_hub llama-cpp-python playwright
+          playwright install chromium
+          playwright install-deps chromium
+
+      - name: Descargar modelo GGUF con HF_TOKEN
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          huggingface-cli download Qwen/Qwen2.5-Coder-1.5B-Instruct-GGUF qwen2.5-coder-1.5b-instruct-q4_k_m.gguf --local-dir ./modelo --token $HF_TOKEN
+
+      - name: Generar HTML con el modelo
+        env:
+          PROMPT: ${{ inputs.prompt }}
+          DURATION: ${{ inputs.duration }}
+        run: |
+          python <<'EOF'
+          import os
+          from llama_cpp import Llama
+          
+          prompt = os.environ['PROMPT']
+          duration = os.environ['DURATION']
+          
+          llm = Llama(model_path="./modelo/qwen2.5-coder-1.5b-instruct-q4_k_m.gguf", n_ctx=4096, n_threads=2)
+          
+          system_prompt = f"""You are a motion designer. Create a self-contained HTML document for a vertical video (9:16) about: "{prompt}". Use GSAP (loaded via CDN) for animations with at least 3 scenes, gradients, and animated text. The total animation should last {duration} seconds. Return ONLY the raw HTML code, starting with <!DOCTYPE html> and ending with </html>."""
+          
+          output = llm(system_prompt, max_tokens=3000, temperature=0.7)
+          html = output['choices'][0]['text']
+          html = html.replace('```html', '').replace('```', '').strip()
+          
+          with open('video.html', 'w') as f:
+              f.write(html)
+          
+          slug = ''.join(c if c.isalnum() else '-' for c in prompt.lower())[:30].strip('-')
+          with open('slug.txt', 'w') as f:
+              f.write(slug)
+          EOF
+
+      - name: Renderizar video con Playwright y FFmpeg
+        env:
+          DURATION: ${{ inputs.duration }}
+        run: |
+          python <<'EOF'
+          import asyncio
+          import os
+          from playwright.async_api import async_playwright
+          
+          DURATION = int(os.environ['DURATION'])
+          FPS = 30
+          TOTAL_FRAMES = DURATION * FPS
+          
+          async def render():
+              async with async_playwright() as p:
+                  browser = await p.chromium.launch(args=['--no-sandbox'])
+                  page = await browser.new_page(viewport={'width': 480, 'height': 854})
+                  await page.goto('file://' + os.getcwd() + '/video.html')
+                  await page.wait_for_timeout(1000)
+                  
+                  os.makedirs('frames', exist_ok=True)
+                  for i in range(TOTAL_FRAMES):
+                      await page.screenshot(path=f'frames/frame_{i:05d}.png')
+                      await page.wait_for_timeout(1000 // FPS)
+                  
+                  await browser.close()
+          
+          asyncio.run(render())
+          EOF
+          
+          ffmpeg -framerate 30 -i frames/frame_%05d.png -c:v libx264 -pix_fmt yuv420p -y video.mp4
+          ls -lh video.mp4
+
+      - name: Crear nombre único
+        id: filename
+        run: |
+          SLUG=$(cat slug.txt)
+          TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+          echo "name=${SLUG}-${TIMESTAMP}" >> $GITHUB_OUTPUT
+
+      - name: Subir video a GitHub Releases
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: video-${{ steps.filename.outputs.name }}
+          files: video.mp4
+          name: "Video: ${{ inputs.prompt }}"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Obtener URL de descarga
+        id: url
+        run: |
+          URL="https://github.com/${{ github.repository }}/releases/download/video-${{ steps.filename.outputs.name }}/video.mp4"
+          echo "video_url=$URL" >> $GITHUB_OUTPUT
+          echo "URL final: $URL"
+
+      - name: Limpiar videos antiguos (mantener los últimos 30)
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const MAX_RELEASES = 30;
+            const releases = await github.rest.repos.listReleases({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              per_page: 100
+            });
+            const sorted = releases.data.sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+            if (sorted.length > MAX_RELEASES) {
+              const toDelete = sorted.slice(0, sorted.length - MAX_RELEASES);
+              for (const release of toDelete) {
+                console.log(`Borrando release antiguo: ${release.tag_name}`);
+                await github.rest.repos.deleteRelease({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  release_id: release.id
+                });
+                try {
+                  await github.rest.git.deleteRef({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    ref: `tags/${release.tag_name}`
+                  });
+                } catch (e) { console.log('Tag ya borrado'); }
+              }
+            }
